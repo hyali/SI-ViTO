@@ -2,15 +2,11 @@
 import math
 import random
 import logging
-
-import matplotlib.pyplot as plt
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 from numpy.lib import pad
 import torch
 import os
-
-from sympy.physics.vector.tests.test_printing import alpha
 from torch import nn
 from torch.nn import functional as F
 from random import randint
@@ -258,94 +254,6 @@ def focal_loss(inputs, targets, gamma=0.5, reduction="mean", bg_weight=0.2, num_
     return loss
 
 
-def combined_focal_dice_loss(inputs, targets, gamma=0.5, reduction="mean",
-                             bg_weight=0.2, num_classes=None, dice_weight=0.3, epsilon=1e-7):
-    """
-    组合Focal Loss和Dice Loss的多分类损失函数
-    适用于单类别、小目标密集的遥感图像分类场景
-
-    """
-    # 计算Focal Loss部分
-    fl = focal_loss(inputs, targets, gamma, reduction, bg_weight, num_classes)
-
-    # 准备Dice Loss计算
-    probs = F.softmax(inputs, dim=1)
-
-    # 计算Dice Loss部分
-    probs = F.softmax(inputs, dim=1)  # (N, 2)
-    targets_one_hot = F.one_hot(targets, num_classes=2).float()  # (N, 2)
-
-    # 计算每个类别的交集和并集
-    intersection = torch.sum(probs * targets_one_hot, dim=0)  # (2,)
-    union = torch.sum(probs, dim=0) + torch.sum(targets_one_hot, dim=0)
-
-    # 按类别加权（背景类别特殊处理）
-    dice_per_class = (2. * intersection + epsilon) / (union + epsilon)  # (2,)
-    dice_loss = 1 - dice_per_class
-    dice_loss = dice_loss * torch.tensor([1.0, bg_weight], device=inputs.device)
-
-    # 按类别平均
-    dice_loss = dice_loss.mean()
-
-    # 组合两种损失
-    total_loss = fl + dice_weight * dice_loss
-
-    return total_loss
-
-
-def binary_focal_loss(inputs, targets, gamma=2.0, alpha=0.25, bg_weight=0.2, reduction="mean"):
-    """
-    二分类 Focal Loss（适配形状 [N, 2] 的 logits）
-    Args:
-        inputs: 模型输出logits (N, 2)，[目标类分数, 背景类分数]
-        targets: 标签 (N,)，0为背景，1为目标类
-        gamma: 难样本聚焦参数（越大越关注难样本）
-        alpha: 正类平衡权重（建议正样本少时设为0.25~0.5）
-        bg_weight: 背景损失全局权重（通常<1以抑制背景）
-        reduction: 聚合方式 ("mean", "sum"或None)
-    """
-    assert inputs.shape[1] == 2, "输入形状需为[N, 2]"
-
-    # 分离目标类和背景类logits
-    pos_logits = inputs[:, 0]  # 目标类logits (N,)
-    neg_logits = inputs[:, 1]  # 背景类logits (N,)
-
-    # 计算二元概率
-    pos_probs = torch.sigmoid(pos_logits)  # 目标类概率 p
-    neg_probs = torch.sigmoid(neg_logits)  # 背景类概率 1-p（若需要）
-
-    # 根据标签选择有效logits
-    pos_mask = (targets == 1)  # 正样本掩码
-    valid_logits = torch.where(pos_mask, pos_logits, neg_logits)
-    valid_probs = torch.where(pos_mask, pos_probs, neg_probs)
-
-    # 计算基础交叉熵损失
-    ce_loss = F.binary_cross_entropy_with_logits(
-        valid_logits,
-        targets.float(),
-        reduction="none"
-    )
-
-    # Focal调制因子
-    p_t = torch.where(pos_mask, valid_probs, 1 - valid_probs)
-    focal_term = (1 - p_t) ** gamma
-
-    # 类别权重（正类alpha，背景1-alpha）
-    alpha_weight = torch.where(pos_mask, alpha, 1 - alpha)
-
-    # 背景额外降权
-    loss = ce_loss * focal_term * alpha_weight
-    loss = torch.where(~pos_mask, loss * bg_weight, loss)
-
-    # 聚合方式
-    if reduction == "mean":
-        return loss.mean()
-    elif reduction == "sum":
-        return loss.sum()
-    else:
-        return loss
-
-
 def distance_embed(x, temperature=10000, num_pos_feats=128, scale=10.0):
     # x: [bs, n_dist]
     x = x[..., None]
@@ -415,55 +323,43 @@ def elementwise_box_iou(boxes1, boxes2) -> Tuple[torch.Tensor]:
     iou = inter / (union + 1e-6)
     return iou, union
 
-def softshrink_tensor(x, lambd):
-
-    return torch.where(x > lambd, x - lambd, torch.where(x < -lambd, x + lambd, torch.zeros_like(x)))
-
-# 多头注意机制实现
+# Multi-head attention mechanism
 class ProtoCenterAttention(nn.Module):
     def __init__(self, input_size, num_heads=4, dropout=0.1):
         super(ProtoCenterAttention, self).__init__()
         self.num_heads = num_heads
         self.head_dim = input_size // num_heads
 
-        # 多头注意力的 QKV 线性变换
         self.qkv = nn.Linear(input_size, 3 * input_size)
         self.attn_dropout = nn.Dropout(dropout)
         self.proj = nn.Linear(input_size, input_size)
         self.proj_dropout = nn.Dropout(dropout)
 
-        # 聚合后的全连接层（保留原设计）
         self.fc = nn.Linear(input_size, input_size)
 
     def forward(self, x):
         batch_size, num_samples, input_size = x.shape
 
-        # 生成 QKV
         qkv = self.qkv(x).reshape(batch_size, num_samples, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, B, H, N, D/H]
         queries, keys, values = qkv[0], qkv[1], qkv[2]
 
-        # 计算注意力分数 (Scaled Dot-Product Attention)
+        # Scaled Dot-Product Attention
         attn_scores = torch.matmul(queries, keys.transpose(-2, -1)) / (self.head_dim ** 0.5)
         attn_scores = attn_scores.softmax(dim=-1)
         attn_scores = self.attn_dropout(attn_scores)
 
-        # 加权聚合 Values
         weighted = torch.matmul(attn_scores, values)
         weighted = weighted.transpose(1, 2).reshape(batch_size, num_samples, input_size)
 
-        # 投影层
         weighted = self.proj(weighted)
         weighted = self.proj_dropout(weighted)
 
-        # 沿样本维度聚合（加权平均）
-        aggregated = weighted.mean(dim=1)  # 或加权.sum(dim=1)
+        aggregated = weighted.mean(dim=1)  
 
-        # 全连接层
         output = self.fc(aggregated)
 
-        # 返回输出和注意力分数（取第一个头的注意力分数）
-        return output, attn_scores[:, 0, :, :].mean(dim=1)  # 示例：取第一个头的注意力分数
+        return output, attn_scores[:, 0, :, :].mean(dim=1)  
 
 
 class InstReweight(nn.Module):
@@ -487,46 +383,40 @@ class AttentionClassScoring(nn.Module):
         self.num_classes = num_classes
         self.num_heads = num_heads
 
-
         self.class_to_query = nn.Linear(feat_dim, feat_dim)
-
 
         self.feature_to_key = nn.Linear(feat_dim, feat_dim)
         self.feature_to_value = nn.Linear(feat_dim, feat_dim)
 
-        # 多头注意力机制（batch_first=True 表示输入形状为 (B, seq_len, feat_dim)）
         self.multihead_attn = nn.MultiheadAttention(
             embed_dim=feat_dim,
             num_heads=num_heads,
             batch_first=True
         )
 
-        # 分类得分计算
         self.scorer = nn.Linear(feat_dim, 1)
 
     def forward(self, roi_features, class_weights):
         """
         Args:
-            roi_features: (B, C, H*W)  # 输入特征（已展平）
-            class_weights: (num_classes, C)  # 类别权重向量
+            roi_features: (B, C, H*W)  
+            class_weights: (num_classes, C)  
         Returns:
-            init_scores: (B, num_classes)  # 初始类别得分
+            init_scores: (B, num_classes) 
         """
         B, C, num_patches = roi_features.shape
 
-        class_weights = class_weights.to(roi_features.device)  # 新增此行
+        class_weights = class_weights.to(roi_features.device)  
 
-        # 调整特征形状: (B, C, H*W) -> (B, H*W, C)
+        # (B, C, H*W) -> (B, H*W, C)
         roi_flat = roi_features.permute(0, 2, 1)  # (B, num_patches, C)
 
-        # 将类别权重扩展为 Batch 维度: (num_classes, C) -> (B, num_classes, C)
+        # (num_classes, C) -> (B, num_classes, C)
         class_queries = class_weights.unsqueeze(0).expand(B, -1, -1)  # (B, num_classes, C)
-
 
         queries = self.class_to_query(class_queries)  # (B, num_classes, C)
         keys = self.feature_to_key(roi_flat)  # (B, num_patches, C)
         values = self.feature_to_value(roi_flat)  # (B, num_patches, C)
-
 
         attn_output, _ = self.multihead_attn(
             query=queries,
@@ -534,7 +424,6 @@ class AttentionClassScoring(nn.Module):
             value=values,
             need_weights=False
         )  # attn_output: (B, num_classes, C)
-
 
         scores = self.scorer(attn_output).squeeze(-1)  # (B, num_classes)
         return scores
@@ -585,20 +474,6 @@ class RPNScoreFusion(nn.Module):
         return features * channel_weights + features
 
 
-class SparseSELayer(nn.Module):
-    def __init__(self, channels, reduction=16):
-        super().__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(channels, channels // reduction),
-            nn.ReLU(inplace=True),
-            nn.Linear(channels // reduction, channels),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        return self.fc(x)
-
-
 class PrototypeInfoNCE(nn.Module):
     def __init__(self, temperature=0.07, background_class=7):
         super().__init__()
@@ -607,16 +482,14 @@ class PrototypeInfoNCE(nn.Module):
 
     def forward(self, class_weights, roi_features, class_labels):
         """
-        class_weights: (num_classes, 1024) 类别原型向量
-        roi_features: (1024, 1024, h*w) roi特征图，第一个1024是roi数量
-        class_labels: (1024,) 每个roi的类别标签 (0-num_classes, num_classes=背景)
+        class_weights: (num_classes, 1024) 
+        roi_features: (1024, 1024, h*w) 
+        class_labels: (1024,) 
         """
-
         roi_vectors =  roi_features.mean(dim=2)
 
         roi_vectors = F.normalize(roi_vectors, p=2, dim=1)  # (1024, 1024)
         prototypes = F.normalize(class_weights, p=2, dim=1)  # (7, 1024)
-
 
         fg_mask = class_labels != self.background_class  # (1024,)
         fg_labels = class_labels[fg_mask]  # (num_fg,)
@@ -626,14 +499,12 @@ class PrototypeInfoNCE(nn.Module):
         if num_fg == 0:
             return torch.tensor(0.0, device=roi_vectors.device, requires_grad=True)
 
-
         similarity = prototypes @ fg_vectors.T  # (7, num_fg)
         similarity /= self.temperature
 
-
         loss = F.cross_entropy(
-            similarity.T,
-            fg_labels.long(),
+            similarity.T, 
+            fg_labels.long(), 
             reduction='mean'
         )
 
@@ -738,10 +609,10 @@ class OpenSetDetectorWithExamples(nn.Module):
                  set_cd_vito=False,
                  attn_fuse_ratio=0.7,
                  train_test_overlap=True,
-                 controller=False,
-                 instance_sparse=0.2,
-                 query_sparse=0.5,
-                 proto_temp=0.01
+                 controller=False
+                 # attn_drop=0.2,
+                 # aux_param=0.2
+                 # sparsity_lambda=0.001
                  ):
         super().__init__()
         if ',' in class_prototypes_file:
@@ -778,14 +649,11 @@ class OpenSetDetectorWithExamples(nn.Module):
                 self.offline_div_pixel = False
 
         self.proposal_matcher = proposal_matcher
-        # 新增分数融合模块
+
         self.rpn_score_fusion = RPNScoreFusion(in_channels=1024)
         self.linear_q_k = nn.Linear(1024, 1024)
 
-        self.instance_sparse = instance_sparse
-        self.query_sparse = query_sparse
-        self.proto_temp = proto_temp
-
+        print("CACHE_MODEL_VALUES path:", cache_model_values_file) 
         self.cache_model_keys = torch.load(cache_model_keys_file)
         self.cache_model_values = torch.load(cache_model_values_file)
 
@@ -842,7 +710,7 @@ class OpenSetDetectorWithExamples(nn.Module):
             self.prototype_ce = nn.CrossEntropyLoss()
             self.proto_info_nce = InfoNCE(temperature=2, negative_mode='paired')
         if self.set_cd_vito and self.num_train_classes == 1:
-
+            # self.num_domain_prompter = int(self.num_train_classes * 2)
             self.num_domain_prompter = 10
             self.domain_prompter = nn.Embedding(num_embeddings=self.num_domain_prompter, embedding_dim=self.ndim).cuda()
             self.domain_prompter_info_nce = InfoNCE()
@@ -1118,6 +986,8 @@ class OpenSetDetectorWithExamples(nn.Module):
             offline_cfg.MODEL.BACKBONE.FREEZE_AT = 0  # make all fronzon layers to "SyncBN"
             offline_cfg.MODEL.RESNETS.NORM = "BN"  # 5 resnet layers
             offline_cfg.MODEL.FPN.NORM = "BN"  # fpn layers
+            # offline_cfg.MODEL.RESNETS.NORM = "SyncBN" # 5 resnet layers
+            # offline_cfg.MODEL.FPN.NORM = "SyncBN" # fpn layers
             offline_cfg.MODEL.RPN.CONV_DIMS = [-1, -1]  # rpn layers
         if cfg.DE.OFFLINE_RPN_NMS_THRESH:
             offline_cfg.MODEL.RPN.NMS_THRESH = cfg.DE.OFFLINE_RPN_NMS_THRESH  # 0.9
@@ -1364,12 +1234,21 @@ class OpenSetDetectorWithExamples(nn.Module):
         loss_dict = {}
         if not self.training: assert bs == 1
         if self.set_cd_vito:
+            instance_features = self.class_weights.weight  
+
+            mean = instance_features.mean(axis=1, keepdims=True)  
+            std = instance_features.std(dim=1, keepdim=True) 
+            sparse_features = (instance_features - mean) / std  
+            sparse_features = nn.functional.softshrink(sparse_features, 0.2)  
+
             self.train_class_weight, _ = self.adapter(sparse_features.view(-1, self.k_shot, self.ndim))
+
             self.update_test_buffer(self.train_class_weight)
         if self.training:
             class_weights = self.train_class_weight
         else:
             if self.use_one_shot:
+                # assemble weights on the fly
                 class_weights = []
                 for c in self.all_labels:
                     if c in self.seen_labels:
@@ -1384,6 +1263,7 @@ class OpenSetDetectorWithExamples(nn.Module):
                 class_weights = self.test_class_weight
 
         num_classes = len(class_weights)
+
         with torch.no_grad():
             if self.offline_backbone.training or self.offline_proposal_generator.training:
                 self.offline_backbone.eval()
@@ -1401,44 +1281,43 @@ class OpenSetDetectorWithExamples(nn.Module):
                 patch_tokens = all_patch_tokens[self.vit_feat_name]
                 all_patch_tokens.pop(self.vit_feat_name)
 
-
         if self.training or self.use_one_shot:
             with torch.no_grad():
                 gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
-                gt_boxes = [x.gt_boxes.tensor for x in gt_instances]
+                gt_boxes = [x.gt_boxes.tensor for x in gt_instances]  
 
-                rpn_boxes = [x.proposal_boxes.tensor for x in proposals]
+                rpn_boxes = [x.proposal_boxes.tensor for x in proposals] 
                 rpn_scores = [x.objectness_logits for x in proposals]
-
-                if self.training:
+                # could try to use only gt_boxes to see the accuracy
+                if self.training: 
                     noisy_boxes = self.prepare_noisy_boxes(gt_boxes, images.tensor.shape)
                     boxes = [torch.cat([gt_boxes[i], noisy_boxes[i], rpn_boxes[i]])
                              for i in range(len(batched_inputs))]
-
+                   
                     rpn_pos_scores = torch.cat([s[s > 0] for s in rpn_scores])
                     if len(rpn_pos_scores) > 0:
-                        gt_score = rpn_pos_scores.max() + 1.0
+                        gt_score = rpn_pos_scores.max() + 1.0 
                     else:
-                        gt_score = 2.0
+                        gt_score = 2.0 
                     gt_scores = [torch.full_like(gt_boxes[i][:, 0], fill_value=gt_score)
                                  for i in range(len(batched_inputs))]
-
+                   
                     rpn_neg_scores = torch.cat([s[s < 0] for s in rpn_scores])
                     if len(rpn_neg_scores) > 0:
-                        noisy_score = rpn_neg_scores.min() - 1.0
+                        noisy_score = rpn_neg_scores.min() - 1.0  
                     else:
-                        noisy_score = -2.0
+                        noisy_score = -2.0 
                     noisy_scores = [torch.full_like(noisy_boxes[i][:, 0], fill_value=noisy_score)
                                     for i in range(len(batched_inputs))]
                     scores = [
                         torch.cat([gt_scores[i], noisy_scores[i], rpn_scores[i]])
                         for i in range(len(batched_inputs))
                     ]
-                    scores = [(score - score.mean()) / score.std() for score in scores]
+                    scores = [(score - score.mean()) / score.std() for score in scores] 
                 else:
-                    boxes = rpn_boxes
+                    boxes = rpn_boxes 
                     scores = rpn_scores
-                    scores = [(score - score.mean()) / score.std() for score in scores]
+                    scores = [(score - score.mean()) / score.std() for score in scores] 
 
                 class_labels = []
                 matched_gt_boxes = []
@@ -1450,32 +1329,32 @@ class OpenSetDetectorWithExamples(nn.Module):
                 for proposals_per_image, targets_per_image in zip(boxes, gt_instances):
                     match_quality_matrix = box_iou(
                         targets_per_image.gt_boxes.tensor, proposals_per_image
-                    )
-                    matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
-                    if len(targets_per_image.gt_classes) > 0:
+                    ) 
+                    matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix) 
+                    if len(targets_per_image.gt_classes) > 0:  
                         class_labels_i = targets_per_image.gt_classes[matched_idxs]
                     else:
                         # no annotation on this image
                         assert torch.all(matched_labels == 0)
                         class_labels_i = torch.zeros_like(matched_idxs)
-                    class_labels_i[matched_labels == 0] = num_classes
-                    class_labels_i[matched_labels == -1] = -1
-
-                    if self.training or self.evaluation_shortcut:
+                    class_labels_i[matched_labels == 0] = num_classes  
+                    class_labels_i[matched_labels == -1] = -1 
+                    
+                    if self.training or self.evaluation_shortcut:  
                         positive = ((class_labels_i != -1) & (class_labels_i != num_classes)).nonzero().flatten()
                         negative = (class_labels_i == num_classes).nonzero().flatten()
 
                         batch_size_per_image = self.batch_size_per_image  # 512
                         num_pos = int(batch_size_per_image * self.pos_ratio)
-
+                        # protect against not enough positive examples
                         num_pos = min(positive.numel(), num_pos)
                         num_neg = batch_size_per_image - num_pos
-
+                        # protect against not enough negative examples
                         num_neg = min(negative.numel(), num_neg)
 
                         perm1 = torch.randperm(positive.numel(), device=self.device)[:num_pos]
                         perm2 = torch.randperm(negative.numel())[:num_neg].to(
-                            self.device)
+                            self.device)  # torch.randperm(negative.numel(), device=negative.device)[:num_neg]
                         pos_idx = positive[perm1]
                         neg_idx = negative[perm2]
                         sampled_idxs = torch.cat([pos_idx, neg_idx], dim=0)
@@ -1518,10 +1397,10 @@ class OpenSetDetectorWithExamples(nn.Module):
                     batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(self.device)
                     rois.append(torch.cat([batch_index, box], dim=1))
                 rois = torch.cat(rois)
-                # 新增分数处理逻辑
+        
                 resampled_scores = []
                 for proposals_per_image, scores_per_image in zip(resampled_proposals, scores):
-                    # 将采样后的候选框与原始分数对齐
+                   
                     _, keep_idx = torch.unique(proposals_per_image, dim=0, return_inverse=True)
                     resampled_scores.append(scores_per_image[keep_idx])
                 resampled_scores = torch.cat(resampled_scores).unsqueeze(1)
@@ -1532,23 +1411,37 @@ class OpenSetDetectorWithExamples(nn.Module):
             scores = (scores - scores.mean()) / scores.std()
             rois = torch.cat([torch.full((len(boxes), 1), fill_value=0).to(self.device),
                               boxes], dim=1)
-
+           
             resampled_scores = scores.unsqueeze(1)
 
         roi_features = self.roi_align(patch_tokens, rois)  # N, C, k, k
+        roi_features = self.rpn_score_fusion(roi_features, resampled_scores)   #（1024，1024，7，7）
+
+        # sparse
+        batch, C, H, W = roi_features.size()
+        roi_reshaped = roi_features.view(batch, C, H*W).permute(0, 2, 1)
+        x_q = self.linear_q_k(roi_reshaped)  # (1024, 49, d_k)
+        x_k = self.linear_q_k(roi_reshaped)  # (1024, 49, d_k)
+        x_a = torch.matmul(x_q, x_k.permute(0, 2, 1))  # (1024, 49, 49)
+        x_a = nn.functional.softshrink(x_a, 0.5) 
+        x_a = nn.functional.softmax(x_a, dim=-1) 
+        x_o = torch.matmul(x_a, roi_reshaped)  # (1024, 49, 1024)
+        x_o = x_o.permute(0, 2, 1).view(batch, C, H, W)  # (1024, 1024, 7, 7)
+        roi_features = roi_features + x_o
+
         roi_bs = len(roi_features)
 
         # roi_features # N x emb x spatial
-
-        if self.training and (not self.only_train_mask):
+        # %% #! Classification
+        if (self.training and (not self.only_train_mask)) or (not self.training)::
 
             roi_features = roi_features.flatten(2)
             bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
 
+            # (N x spatial x emb) @ (emb x class) = N x spatial x class
+            feats = roi_features.transpose(-2, -1) @ class_weights.T 
 
-            feats = roi_features.transpose(-2, -1) @ class_weights.T
-
-
+            # sample topk classes
             class_topk = self.num_sample_class
             class_indices = None
             if class_topk < 0:
@@ -1658,143 +1551,6 @@ class OpenSetDetectorWithExamples(nn.Module):
                 # N x (classes + 1)   N x (topk + background)
                 logits = torch.cat([cls_logits, bg_logits], dim=1)
                 logits = logits / self.cls_temp
-
-        elif not self.training:
-         
-            torch.cuda.empty_cache()
-            roi_features = roi_features.flatten(2)
-
-            bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
-
-
-            gamma = 0.5
-            new_cache_model_keys = gamma * self.cache_model_keys.to(self.device) + (1-gamma) * self.class_weights.weight.T
-            affinity = F.normalize(roi_features.flatten(2).mean(2), dim=1) @ new_cache_model_keys
-
-            beta, alpha = 1, 0.5
-            cache_logits = ((-1) * (beta - beta * affinity)).exp() @ self.cache_model_values.to(self.device)
-            cache_logits /= cache_logits.norm(dim=1, keepdim=True)
-            cache_logits, topk_indices = torch.topk(cache_logits, k=self.num_sample_class, dim=1)
-
-
-            feats = roi_features.transpose(-2, -1) @ class_weights.T
-
-
-            class_topk = self.num_sample_class
-            class_indices = None
-            if class_topk < 0:
-                class_topk = num_classes
-                sample_class_enabled = False
-            else:
-                if class_topk == 0:
-                    class_topk = num_classes
-                sample_class_enabled = True
-
-            if sample_class_enabled:
-                num_active_classes = class_topk
-                init_scores = F.normalize(roi_features.flatten(2).mean(2), dim=1) @ class_weights.T
-                topk_class_indices = torch.topk(init_scores, class_topk, dim=1).indices
-
-                if self.training:
-                    class_indices = []
-                    for i in range(roi_bs):
-                        curr_label = class_labels[i].item()
-                        topk_class_indices_i = topk_class_indices[i].cpu()
-                        if curr_label in topk_class_indices_i or curr_label == num_classes:
-                            curr_indices = topk_class_indices_i
-                        else:
-                            curr_indices = torch.cat([torch.as_tensor([curr_label]),
-                                                      topk_class_indices_i[:-1]])
-                        class_indices.append(curr_indices)
-                    class_indices = torch.stack(class_indices).to(self.device)
-                else:
-                    class_indices = topk_class_indices
-                class_indices = torch.sort(class_indices, dim=1).values
-            else:
-                num_active_classes = num_classes
-
-            other_classes = []
-            if sample_class_enabled:
-                indexes = torch.arange(0, num_classes, device=self.device)[None, None, :].repeat(bs, spatial_size, 1)
-                for i in range(class_topk):
-                    cmask = indexes != class_indices[:, i].view(-1, 1, 1)
-                    _ = torch.gather(feats, 2,
-                                     indexes[cmask].view(bs, spatial_size, num_classes - 1))  # N x spatial x classes-1
-                    other_classes.append(_[:, :, None, :])
-            else:
-                for c in range(num_classes):  # TODO: change to classes sampling during training for LVIS type datasets
-                    cmask = torch.ones(num_classes, device=self.device, dtype=torch.bool)
-                    cmask[c] = False
-                    _ = feats[:, :, cmask]  # # N x spatial x classes-1
-                    other_classes.append(_[:, :, None, :])
-            if num_classes > 1:
-                other_classes = torch.cat(other_classes, dim=2)  # N x spatial x classes x classes-1
-                other_classes = other_classes.permute(0, 2, 1, 3)  # N x classes x spatial x classes-1
-                other_classes = other_classes.flatten(0, 1)  # (Nxclasses) x spatial x classes-1
-                other_classes, _ = torch.sort(other_classes, dim=-1)
-                other_classes = interpolate(other_classes, self.T, mode='linear')  # (Nxclasses) x spatial x T
-                other_classes = self.fc_other_class(other_classes)  # (Nxclasses) x spatial x emb
-                other_classes = other_classes.permute(0, 2, 1)  # (Nxclasses) x emb x spatial
-                # (Nxclasses) x emb x S x S
-                inter_dist_emb = other_classes.reshape(bs * num_active_classes, -1, self.roialign_size,
-                                                       self.roialign_size)
-            intra_feats = torch.gather(feats, 2, class_indices[:, None, :].repeat(1, spatial_size,
-                                                                                  1)) if sample_class_enabled else feats
-            intra_dist_emb = distance_embed(intra_feats.flatten(0, 1),
-                                            num_pos_feats=self.Tpos_emb)  # (Nxspatial) x class x emb
-            intra_dist_emb = self.fc_intra_class(intra_dist_emb)
-            intra_dist_emb = intra_dist_emb.reshape(bs, spatial_size, num_active_classes, -1)
-
-            # (Nxclasses) x emb x S x S
-            intra_dist_emb = intra_dist_emb.permute(0, 2, 3, 1).flatten(0, 1).reshape(bs * num_active_classes, -1,
-                                                                                      self.roialign_size,
-                                                                                      self.roialign_size)
-            if self.set_cd_vito:
-                bg_feats = roi_features.transpose(-2, -1) @ self.bg_tokens.weight.t()  # N x spatial x back
-            else:
-                bg_feats = roi_features.transpose(-2, -1) @ self.bg_tokens.T  # N x spatial x back
-            bg_dist_emb = self.fc_back_class(bg_feats)  # N x spatial x emb
-            bg_dist_emb = bg_dist_emb.permute(0, 2, 1).reshape(bs, -1, self.roialign_size, self.roialign_size)
-            # N x emb x S x S
-
-            bg_dist_emb_c = bg_dist_emb[:, None, :, :, :].expand(-1, num_active_classes, -1, -1, -1).flatten(0, 1)
-            # (Nxclasses) x emb x S x S
-
-            # (Nxclasses) x EMB x S x S
-            if num_classes > 1:
-                per_cls_input = torch.cat([intra_dist_emb, inter_dist_emb, bg_dist_emb_c], dim=1)
-            else:
-                per_cls_input = torch.cat([intra_dist_emb, bg_dist_emb_c, bg_dist_emb_c], dim=1)
-            # (Nxclasses) x 1
-            cls_logits = self.per_cls_cnn(per_cls_input)
-
-            # N x classes
-            if isinstance(cls_logits, list):
-                cls_logits = [v.reshape(bs, num_active_classes) for v in cls_logits]
-                # cls_logits = [torch.sigmoid(cls_logits[i]) for i in range(len(cls_logits))]
-            else:
-                cls_logits = cls_logits.reshape(bs, num_active_classes)
-            # N x 1
-            # feats: N x spatial x class
-            cls_dist_feats = interpolate(torch.sort(feats, dim=2).values, self.T, mode='linear')  # N x spatial x T
-            bg_cls_dist_emb = self.fc_bg_class(cls_dist_feats)  # N x spatial x emb
-            bg_cls_dist_emb = bg_cls_dist_emb.permute(0, 2, 1).reshape(bs, -1, self.roialign_size, self.roialign_size)
-            bg_logits = self.bg_cnn(torch.cat([bg_cls_dist_emb, bg_dist_emb], dim=1))
-
-            if isinstance(bg_logits, list):
-                logits = []
-                for c, b in zip(cls_logits, bg_logits):
-                    logits.append(torch.cat([c, b], dim=1) / self.cls_temp)
-            else:
-                # N x (classes + 1)   N x (topk + background)
-                logits = torch.cat([cls_logits, bg_logits], dim=1)
-                logits = logits / self.cls_temp  # (1024,topk+1)
-            # logits = logits + cache_logits * alpha
-            if isinstance(logits, list):
-                for i in range(len(logits)):
-                    logits[i][:, :-1] += cache_logits * alpha
-            else:
-                logits[:, :-1] += cache_logits * alpha
         else:
             if self.training:
                 self.turn_off_cls_training()
@@ -1843,6 +1599,11 @@ class OpenSetDetectorWithExamples(nn.Module):
                 # N x emb x K x k
                 bg_aroi_emb = bg_aroi_emb.permute(0, 2, 1).reshape(reg_bs, self.Temb, self.reg_roialign_size,
                                                                    self.reg_roialign_size)
+                # N x K2
+                # tmp = torch.zeros(reg_bs, num_classes, device=self.device)
+                # tmp[torch.arange(reg_bs, device=self.device), fg_class_labels] = 1.0
+                # tmp = tmp[..., None]
+                # fg_aroi_feats = torch.bmm(fg_aroi_feats, tmp)[:, :, 0]
                 fg_aroi_feats = torch.gather(fg_aroi_feats, 2, fg_class_labels[..., None, None].repeat(1, K2, 1))[:, :,
                                 0]
 
@@ -1929,8 +1690,8 @@ class OpenSetDetectorWithExamples(nn.Module):
 
         # %% #! Loss Finalization and Post Processing
         if self.training:
-            # prototypenfoNCE_loss = PrototypeInfoNCE(temperature=self.proto_temp, background_class=num_classes)
-            # loss_dict['prototypenfoNCE_loss'] = prototypenfoNCE_loss(class_weights, roi_features, class_labels)
+            prototypenfoNCE_loss = PrototypeInfoNCE(temperature=0.05, background_class=num_classes)
+            loss_dict['prototypenfoNCE_loss'] = prototypenfoNCE_loss(class_weights, roi_features, class_labels)
             class_labels = class_labels.long()
             if not self.only_train_mask:
                 if sample_class_enabled:
