@@ -1,7 +1,7 @@
 datalist=(
 clipart1k
 fish 
-# artaxor
+artaxor
 neu-det
 uodd
 dior
