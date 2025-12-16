@@ -1,15 +1,10 @@
 # Less is Better: Sparse Instance Learning for Few-Shot Object Detection
 
-> [[Paper](xxxxxxxxx)] &emsp; [[Project Page](https://github.com/johnmaijer/Lesss-is-Better-Sparse-Instance-learning-for-few-shot-object-detection-)] &emsp; <br>
-> Yali Huang, [Jie Mei](https://github.com/johnmaijer), Ziyi Wu, Yiming Yang, Hongru Zhao, Mingyuan Jiu, Hichem Sahbi <br>
+> [[Paper](xxxxxxxxx)] <br>
+> Yali Huang, Jie Mei, Ziyi Wu, Yiming Yang, Hongru Zhao, Mingyuan Jiu*, Hichem Sahbi <br>
 > School of Computer and Artificial Intelligence, Zhengzhou University, China<br>
-> Engineering Research Center of Intelligent Swarm Systems, Ministry of Education, China<br>
+> Engineering Research Center of Intelligent Swarm Systems, Ministry of Education, China<br>National SuperComputing Center in Zhengzhou, Zhengzhou, China<br>Dongfeng Commercial Vehicle Co.,Ltd, China<br>Sorbonne University, CNRS, LIP6, F-75005, Paris, France
 >
-> National SuperComputing Center in Zhengzhou, Zhengzhou, China<br>
->
-> Dongfeng Commercial Vehicle Co.,Ltd, China<br>
->
-> Sorbonne University, CNRS, LIP6, F-75005, Paris, France
 
 ---
 ## 🧠Overview
@@ -75,8 +70,6 @@ Run inference:
 ![compareResult](Doc/compare.png)
 
 ![InferenceResult](Doc/visualization.png)
-
-​						           **CD-ViTO**                                                       **SI-ViTO**                                                      **Ground Truth**
 
 
 ## 📄 Citation
