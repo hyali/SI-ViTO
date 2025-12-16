@@ -1,7 +1,10 @@
 datalist=(
-dataset1
-dataset2
-dataset3
+clipart1k
+fish 
+# artaxor
+neu-det
+uodd
+dior
 )
 shot_list=(
 1
@@ -10,8 +13,6 @@ shot_list=(
 )
 model_list=(
 "l"
-#"b"
-#"s"
 )
 for model in "${model_list[@]}"; do
   for dataset in "${datalist[@]}"; do

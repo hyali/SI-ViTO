@@ -70,7 +70,7 @@ ALL_CLS_DICT = {
 }
 
 # custom datasets
-datasets_name = ('dataset1', 'dataset2', 'dataset3')#, 'DIOR', 'FISH', 'NEUDET', 'UODD')
+datasets_name = ('clipart1k', 'FISH','DIOR', 'ArTaxOr', 'NEUDET', 'UODD')#, 'DIOR', 'FISH', 'NEUDET', 'UODD')
 
 CLASS_NAME = {
     'ArTaxOr_classes': ['Araneae', 'Coleoptera', 'Diptera', 'Hemiptera', 'Hymenoptera', 'Lepidoptera', 'Odonata'],

@@ -576,8 +576,6 @@ class OpenSetDetectorWithExamples(nn.Module):
                  offline_input_format: Optional[str] = None,
 
                  class_prototypes_file="",
-                 cache_model_keys_file="",
-                 cache_model_values_file="",
                  bg_prototypes_file="",
                  roialign_size=7,
                  box_noise_scale=1.0,
@@ -652,10 +650,6 @@ class OpenSetDetectorWithExamples(nn.Module):
 
         self.rpn_score_fusion = RPNScoreFusion(in_channels=1024)
         self.linear_q_k = nn.Linear(1024, 1024)
-
-        print("CACHE_MODEL_VALUES path:", cache_model_values_file) 
-        self.cache_model_keys = torch.load(cache_model_keys_file)
-        self.cache_model_values = torch.load(cache_model_values_file)
 
         if isinstance(class_prototypes_file, str):
             dct = torch.load(class_prototypes_file)
@@ -1019,8 +1013,6 @@ class OpenSetDetectorWithExamples(nn.Module):
             "pixel_std": cfg.MODEL.PIXEL_STD,
             "class_prototypes_file": cfg.DE.CLASS_PROTOTYPES,
             "bg_prototypes_file": cfg.DE.BG_PROTOTYPES,
-            "cache_model_keys_file": cfg.DE.CACHE_MODEL_KEYS,
-            "cache_model_values_file": cfg.DE.CACHE_MODEL_VALUES,
             "set_cd_vito": cfg.DE.SET_CD_VITO,
             "attn_fuse_ratio": cfg.DE.ATTN_FUSE_RATIO,
             "train_test_overlap": cfg.DE.TRAIN_TEST_OVERLAP,
@@ -1433,7 +1425,7 @@ class OpenSetDetectorWithExamples(nn.Module):
 
         # roi_features # N x emb x spatial
         # %% #! Classification
-        if (self.training and (not self.only_train_mask)) or (not self.training)::
+        if (self.training and (not self.only_train_mask)) or (not self.training):
 
             roi_features = roi_features.flatten(2)
             bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]

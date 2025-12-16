@@ -317,7 +317,7 @@ def register_all_ade20k(root):
         )
 
 # custom datasets
-datasets_name = ('dataset1', 'dataset2', 'dataset3')#,'UODD', 'clipart1k', 'FISH', 'NEUDET', 'DIOR', 'UODD')
+datasets_name = ('clipart1k', 'FISH','DIOR', 'ArTaxOr', 'NEUDET', 'UODD')#,'UODD', 'clipart1k', 'FISH', 'NEUDET', 'DIOR', 'UODD')
 
 _PREDEFINED_CD = []
 for dataset in datasets_name:
@@ -346,5 +346,5 @@ if __name__.endswith(".builtin"):
     register_all_pascal_voc(_root)
     register_all_ade20k(_root)
     # TODO replace to your own dataset path
-    _CD_root = os.getenv("DETECTRON2_DATASETS", "/root/autodl-tmp/CDFSOD-benchmark-main/datasets/")
+    _CD_root = os.getenv("DETECTRON2_DATASETS", "/root/autodl-tmp/SI-ViTO-main/datasets/")
     register_all_CD(_CD_root)
