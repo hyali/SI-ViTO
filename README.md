@@ -77,10 +77,11 @@ Run inference:
 If you use our method or codes in your research, please cite:
 
 ```
-@inproceedings{fu2025ntire, 
-  title={NTIRE 2025 challenge on cross-domain few-shot object detection: methods and results,
-  author={Fu, Yuqian and Qiu, Xingyu and Ren, Bin and Fu, Yanwei and Timofte, Radu and Sebe, Nicu and Yang, Ming-Hsuan and Van Gool, Luc and others},
-  booktitle={CVPRW},
+@inproceedings{SI-ViTO,
+  title={Less is Better: Sparse Instance Learning for Cross-Domain Few-Shot Object Detection},
+  author={Huang, Yali and Mei, Jie and Wu Ziyi, and Yang, Yiming and Zhao Hongru, and Jiu, Mingyuan and Hichem Sahbi},
+  booktitle={Proceedings of the Computer Vision and Pattern Recognition Conference},
+  pages={1567--1575},
   year={2025}
 }
 ```
