@@ -2,9 +2,14 @@
 
 > [[Paper](xxxxxxxxx)] &emsp; [[Project Page](https://github.com/johnmaijer/Lesss-is-Better-Sparse-Instance-learning-for-few-shot-object-detection-)] &emsp; <br>
 > Yali Huang, [Jie Mei](https://github.com/johnmaijer), Ziyi Wu, Yiming Yang, Hongru Zhao, Mingyuan Jiu, Hichem Sahbi <br>
-> ZhengZhou University, School of Computer and Artificial Intelligence, Zhengzhou University <br>
-> Engineering Research Center of Intelligent Swarm Systems, Ministry of Education
-> Sorbonne University
+> School of Computer and Artificial Intelligence, Zhengzhou University, China<br>
+> Engineering Research Center of Intelligent Swarm Systems, Ministry of Education, China<br>
+>
+> National SuperComputing Center in Zhengzhou, Zhengzhou, China<br>
+>
+> Dongfeng Commercial Vehicle Co.,Ltd, China<br>
+>
+> Sorbonne University, CNRS, LIP6, F-75005, Paris, France
 
 ---
 ## 🧠Overview
@@ -27,12 +32,12 @@ abundant redundant features, lead to superior performance in cross-domain few-sh
 An anaconda environment is suggested, take the name "cdfsod" as an example:
 
 ```
-git clone git@github.com:johnmaijer/Lesss-is-Better-Sparse-Instance-learning-for-few-shot-object-detection-.git
+git clone git@github.com:hyali/SI-ViTO.git
 conda create -n cdfsod python=3.9
 conda activate cdfsod
-pip install -r Lesss-is-Better-Sparse-Instance-learning-for-few-shot-object-detection/requirements.txt 
-pip install -e ./Lesss-is-Better-Sparse-Instance-learning-for-few-shot-object-detection
-cd Lesss-is-Better-Sparse-Instance-learning-for-few-shot-object-detection
+pip install -r SI-ViTO-main/requirements.txt 
+pip install -e ./SI-ViTO-main
+cd SI-ViTO-main
 ```
 
 ## 📂 Dataset Preparation
@@ -48,7 +53,7 @@ To train SI-ViTO on a custom dataset, please refer to DATASETS.md for detailed i
 To train the model: 
 
 1. download weights: download pretrained model from [DE-ViT](https://github.com/mlzxy/devit/blob/main/Downloads.md).
-2. download the CD-FSOD benchmark. Put them in ./Lesss-is-Better-Sparse-Instance-learning-for-few-shot-object-detection/datasets/
+2. download the CD-FSOD benchmark. Put them in ./SI-ViTO-main/datasets/
 3. run script:
 
 ```
@@ -71,6 +76,8 @@ Run inference:
 
 ![InferenceResult](Doc/visualization.png)
 
+​						           **CD-ViTO**                                                       **SI-ViTO**                                                      **Ground Truth**
+
 
 ## 📄 Citation
 
@@ -80,9 +87,7 @@ If you use our method or codes in your research, please cite:
 @inproceedings{SI-ViTO,
   title={Less is Better: Sparse Instance Learning for Cross-Domain Few-Shot Object Detection},
   author={Huang, Yali and Mei, Jie and Wu Ziyi, and Yang, Yiming and Zhao Hongru, and Jiu, Mingyuan and Hichem Sahbi},
-  booktitle={Proceedings of the Computer Vision and Pattern Recognition Conference},
-  pages={1567--1575},
-  year={2025}
+  booktitle={Proceedings of the AAAI Conference on Artificial Intelligence. 2026.}
 }
 ```
 
